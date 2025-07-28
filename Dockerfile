@@ -1,48 +1,59 @@
-# Set the Python version as a build-time argument (default: 3.12-slim-bullseye)
+# Set the python version as a build-time argument
+# with Python 3.12 as the default
 ARG PYTHON_VERSION=3.12-slim-bullseye
 FROM python:${PYTHON_VERSION}
 
-# Set environment variables
-ENV PATH=/opt/venv/bin:$PATH \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+# Create a virtual environment
+RUN python -m venv /opt/venv
 
-# Create and activate virtual environment
-RUN python -m venv /opt/venv && \
-    pip install --upgrade pip
+# Set the virtual environment as the current location
+ENV PATH=/opt/venv/bin:$PATH
 
-# Install system dependencies
+# Upgrade pip
+RUN pip install --upgrade pip
+
+# Set Python-related environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# Install OS dependencies
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     libjpeg-dev \
     libcairo2 \
     gcc \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
-# Create the working directory
+# Create working directory
+RUN mkdir -p /code
 WORKDIR /code
 
-# Copy requirements and install them
+# Copy the requirements file
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Copy the Django project source code
+# Install the Python project requirements
+RUN pip install -r /tmp/requirements.txt
+
+# Copy the Django project code from ./src into /code
 COPY ./src /code
 
-# Set the Django project name
+# Set the Django default project name
 ARG PROJ_NAME="core"
 
-# Create the startup script
-RUN echo '#!/bin/bash' > paracord_runner.sh && \
-    echo 'set -e' >> paracord_runner.sh && \
-    echo 'RUN_PORT="${PORT:-8000}"' >> paracord_runner.sh && \
-    echo 'echo "Running migrations..."' >> paracord_runner.sh && \
-    echo 'python manage.py migrate --no-input' >> paracord_runner.sh && \
-    echo '# Uncomment the next line if using collectstatic' >> paracord_runner.sh && \
-    echo '# python manage.py collectstatic --no-input' >> paracord_runner.sh && \
-    echo 'echo "Starting Gunicorn server..."' >> paracord_runner.sh && \
-    echo "gunicorn ${PROJ_NAME}.wsgi:application --bind \"[::]:\$RUN_PORT\"" >> paracord_runner.sh && \
-    chmod +x paracord_runner.sh
+# Create a bash script to run the Django project
+RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
+    printf "RUN_PORT=\"\${PORT:-8000}\"\n\n" >> ./paracord_runner.sh && \
+    printf "python manage.py migrate --no-input\n" >> ./paracord_runner.sh && \
+    printf "gunicorn ${PROJ_NAME}.wsgi:application --bind \"[::]:\$RUN_PORT\"\n" >> ./paracord_runner.sh
 
-# Run the startup script on container start
-CMD ["bash", "./paracord_runner.sh"]
+# Make the bash script executable
+RUN chmod +x paracord_runner.sh
+
+# Clean up
+RUN apt-get remove --purge -y && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Run the Django project
+CMD ./paracord_runner.sh
